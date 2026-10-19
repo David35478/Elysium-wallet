@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Elysium</string>
+    <string name="app_name">Koro Wallet</string>
     <string name="wallet_default_name">Wallet 1</string>
     <string name="wallet_default_address">0x0cce...9895</string>
     <string name="wallet_full_address">0x0cce81a547FdB8E56Bdf3E44B1578322699895</string>
@@ -13,6 +13,7 @@
     <string name="tab_nfts">NFTs</string>
     <string name="nav_wallet">Wallet</string>
     <string name="nav_swap">Swap</string>
+    <string name="nav_browser">Browser</string>
     <string name="nav_activity">Activity</string>
     <string name="nav_settings">Settings</string>
     <string name="sample_data_badge">Sample Data</string>

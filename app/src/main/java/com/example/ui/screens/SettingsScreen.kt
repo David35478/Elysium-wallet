@@ -369,6 +369,95 @@ fun SettingsScreen(
                 }
             }
 
+            // Section: DApp Browser & Connected Sites
+            item {
+                SettingsSectionHeader(title = "DApp Browser & Connections")
+            }
+
+            item {
+                SettingsGroup {
+                    SettingsRowItem(
+                        icon = Icons.Outlined.Public,
+                        title = "Connected DApps",
+                        subtitle = if (uiState.connectedDappsList.isEmpty()) "No active connections" else "${uiState.connectedDappsList.size} approved site(s)",
+                        trailingContent = {
+                            if (uiState.connectedDappsList.isNotEmpty()) {
+                                Text(
+                                    text = "Revoke All",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = ElysiumAmber,
+                                    modifier = Modifier.clickable { viewModel.revokeAllDappPermissions() }
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+                                    contentDescription = null,
+                                    tint = ElysiumTextTertiary,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            }
+                        },
+                        onClick = {
+                            if (uiState.connectedDappsList.isEmpty()) {
+                                viewModel.triggerActionNotImplemented("No DApps connected yet")
+                            }
+                        },
+                        testTag = "settings_connected_dapps_row"
+                    )
+
+                    // Show individual connected origins if any
+                    uiState.connectedDappsList.forEach { perm ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = perm.origin,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = ElysiumTextPrimary
+                                )
+                                Text(
+                                    text = "Account: ${perm.accountAddress.take(6)}...${perm.accountAddress.takeLast(4)}",
+                                    fontSize = 10.sp,
+                                    color = ElysiumTextTertiary
+                                )
+                            }
+                            Text(
+                                text = "Disconnect",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = ElysiumAmber,
+                                modifier = Modifier
+                                    .clickable { viewModel.revokeDappPermission(perm.origin) }
+                                    .padding(4.dp)
+                            )
+                        }
+                    }
+
+                    SettingsRowItem(
+                        icon = Icons.Outlined.Tune,
+                        title = "Clear Browser History",
+                        subtitle = "Erase visited URLs and local browser cache",
+                        trailingContent = {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+                                contentDescription = null,
+                                tint = ElysiumTextTertiary,
+                                modifier = Modifier.size(12.dp)
+                            )
+                        },
+                        onClick = { viewModel.clearBrowserHistory() },
+                        testTag = "settings_clear_browser_history_row"
+                    )
+                }
+            }
+
             // Section: About
             item {
                 SettingsSectionHeader(title = "About")
@@ -378,7 +467,7 @@ fun SettingsScreen(
                 SettingsGroup {
                     SettingsRowItem(
                         icon = Icons.Outlined.Info,
-                        title = "Elysium Wallet",
+                        title = "Koro Wallet",
                         subtitle = "Version 1.0.0 (Native Android Build)",
                         trailingContent = {
                             Text(

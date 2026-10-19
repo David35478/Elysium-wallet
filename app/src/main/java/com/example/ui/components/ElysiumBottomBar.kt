@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.outlined.AccountBalanceWallet
+import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -71,6 +72,14 @@ fun ElysiumBottomBar(
                 isSelected = currentScreen == Screen.SWAP,
                 onClick = { onNavigate(Screen.SWAP) },
                 testTag = "nav_item_swap"
+            )
+
+            BottomNavItem(
+                icon = Icons.Outlined.Language,
+                label = "Browser",
+                isSelected = currentScreen == Screen.BROWSER,
+                onClick = { onNavigate(Screen.BROWSER) },
+                testTag = "nav_item_browser"
             )
 
             BottomNavItem(

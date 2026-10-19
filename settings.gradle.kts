@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "Elysium Wallet"
+rootProject.name = "Koro Wallet"
 
 include(":app")

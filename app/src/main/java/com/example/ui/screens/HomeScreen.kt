@@ -95,11 +95,13 @@ fun HomeScreen(
             item {
                 TopWalletHeaderCard(
                     wallet = uiState.selectedWallet,
-                    testnetNetworkName = uiState.testnetNetworkName,
-                    testnetHypeBalance = uiState.testnetHypeBalance,
-                    isTestnetLoading = uiState.isTestnetLoading,
-                    testnetErrorMessage = uiState.testnetErrorMessage,
-                    onRefreshClick = { viewModel.refreshTestnetBalance() },
+                    selectedNetwork = uiState.selectedNetwork,
+                    networkStatus = uiState.networkStatus,
+                    balanceFormatted = uiState.networkBalanceFormatted,
+                    isNetworkLoading = uiState.isNetworkLoading,
+                    networkErrorMessage = uiState.networkErrorMessage,
+                    onRefreshClick = { viewModel.refreshNetworkBalance() },
+                    onNetworkClick = { viewModel.setShowNetworkSelector(true) },
                     onSwitchWalletClick = { viewModel.setShowWalletSelector(true) },
                     onCopyAddressClick = { viewModel.copyAddressToClipboard() },
                     onHistoryClick = { viewModel.navigateTo(Screen.ACTIVITY) },

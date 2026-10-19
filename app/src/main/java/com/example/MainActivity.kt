@@ -38,7 +38,13 @@ import com.example.ui.components.SeedBackupDialog
 import com.example.ui.components.SwapConfirmationDialog
 import com.example.ui.components.TokenDetailDialog
 import com.example.ui.components.TokenSelectorDialog
+import com.example.ui.components.NetworkSelectorDialog
 import com.example.ui.components.WalletSelectorDialog
+import com.example.ui.components.DappChainSwitchDialog
+import com.example.ui.components.DappConnectDialog
+import com.example.ui.components.DappSignMessageDialog
+import com.example.ui.components.DappTransactionDialog
+import com.example.ui.screens.browser.DappBrowserScreen
 import com.example.ui.screens.ActivityScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.SettingsScreen
@@ -163,6 +169,26 @@ fun ElysiumWalletApp(
                         uiState = uiState,
                         viewModel = viewModel
                     )
+                    Screen.BROWSER -> DappBrowserScreen(
+                        selectedNetwork = uiState.selectedNetwork,
+                        activeWallet = uiState.selectedWallet,
+                        currentUrl = uiState.browserCurrentUrl,
+                        pageTitle = uiState.browserPageTitle,
+                        isLoading = uiState.isBrowserLoading,
+                        progress = uiState.browserProgress,
+                        errorMessage = uiState.browserErrorMessage,
+                        bookmarks = uiState.browserBookmarks,
+                        history = uiState.browserHistory,
+                        featuredDapps = uiState.featuredDapps,
+                        bridge = viewModel.walletProviderBridge,
+                        onNavigateUrl = { url -> viewModel.openDappUrl(url) },
+                        onCloseBrowser = { viewModel.closeDappBrowser() },
+                        onToggleBookmark = { title, url -> viewModel.toggleBookmark(title, url) },
+                        onRemoveBookmark = { url -> viewModel.removeBookmark(url) },
+                        onClearHistory = { viewModel.clearBrowserHistory() },
+                        onNetworkClick = { viewModel.setShowNetworkSelector(true) },
+                        onWalletClick = { viewModel.setShowWalletSelector(true) }
+                    )
                     Screen.ACTIVITY -> ActivityScreen(
                         uiState = uiState,
                         viewModel = viewModel
@@ -174,8 +200,8 @@ fun ElysiumWalletApp(
                 }
             }
 
-            // Bottom Navigation Bar (Shown only on Home, Activity, Settings)
-            if (uiState.currentScreen == Screen.HOME || uiState.currentScreen == Screen.ACTIVITY || uiState.currentScreen == Screen.SETTINGS) {
+            // Bottom Navigation Bar (Shown on Home, Swap, Browser Discovery, Activity, Settings)
+            if (uiState.currentScreen == Screen.HOME || uiState.currentScreen == Screen.SWAP || (uiState.currentScreen == Screen.BROWSER && uiState.browserCurrentUrl == null) || uiState.currentScreen == Screen.ACTIVITY || uiState.currentScreen == Screen.SETTINGS) {
                 ElysiumBottomBar(
                     currentScreen = uiState.currentScreen,
                     onNavigate = { destination ->
@@ -292,6 +318,18 @@ fun ElysiumWalletApp(
                 )
             }
 
+            if (uiState.showNetworkSelectorDialog) {
+                NetworkSelectorDialog(
+                    networks = uiState.availableNetworks,
+                    selectedNetworkId = uiState.selectedNetwork.id,
+                    onSelectNetwork = { network ->
+                        viewModel.selectNetwork(network)
+                        viewModel.setShowNetworkSelector(false)
+                    },
+                    onDismiss = { viewModel.setShowNetworkSelector(false) }
+                )
+            }
+
             uiState.viewingSecretMnemonic?.let { mnemonic ->
                 SecureSeedViewerDialog(
                     walletName = uiState.selectedWallet.name,
@@ -299,6 +337,43 @@ fun ElysiumWalletApp(
                     isBackupVerified = uiState.isBackupVerified,
                     onDismiss = { viewModel.clearViewingMnemonic() },
                     onMarkVerified = { viewModel.markCurrentWalletBackupVerified() }
+                )
+            }
+
+            // DApp Browser Approval Dialogs
+            uiState.pendingConnectionRequest?.let { req ->
+                DappConnectDialog(
+                    request = req,
+                    wallet = uiState.selectedWallet,
+                    network = uiState.selectedNetwork,
+                    onConnect = { viewModel.approveDappConnection(req.requestId) },
+                    onReject = { viewModel.rejectDappConnection(req.requestId) }
+                )
+            }
+
+            uiState.pendingSignMessageRequest?.let { req ->
+                DappSignMessageDialog(
+                    request = req,
+                    onSign = { viewModel.approveDappSignMessage(req.requestId) },
+                    onReject = { viewModel.rejectDappSignMessage(req.requestId) }
+                )
+            }
+
+            uiState.pendingTransactionRequest?.let { req ->
+                DappTransactionDialog(
+                    request = req,
+                    network = uiState.selectedNetwork,
+                    onApprove = { viewModel.approveDappTransaction(req.requestId) },
+                    onReject = { viewModel.rejectDappTransaction(req.requestId) }
+                )
+            }
+
+            uiState.pendingChainSwitchRequest?.let { req ->
+                DappChainSwitchDialog(
+                    request = req,
+                    currentNetwork = uiState.selectedNetwork,
+                    onConfirm = { viewModel.approveDappChainSwitch(req.requestId) },
+                    onReject = { viewModel.rejectDappChainSwitch(req.requestId) }
                 )
             }
         }

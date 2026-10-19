@@ -1,5 +1,5 @@
 {
-  "name": "Elysium",
+  "name": "Koro Wallet",
   "description": "Native Android crypto wallet featuring Hyperliquid mint-teal gradients, dark charcoal aesthetics, multi-chain balances, interactive swap screen with custom numeric keypad, and wallet settings.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

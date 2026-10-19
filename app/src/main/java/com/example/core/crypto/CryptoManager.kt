@@ -2,8 +2,14 @@ package com.example.core.crypto
 
 import org.web3j.crypto.Bip32ECKeyPair
 import org.web3j.crypto.Credentials
+import org.web3j.crypto.ECKeyPair
 import org.web3j.crypto.Keys
 import org.web3j.crypto.MnemonicUtils
+import org.web3j.crypto.RawTransaction
+import org.web3j.crypto.Sign
+import org.web3j.crypto.TransactionEncoder
+import org.web3j.utils.Numeric
+import java.math.BigInteger
 import java.security.SecureRandom
 
 /**
@@ -82,6 +88,58 @@ object CryptoManager {
             .split("\\s+".toRegex())
             .filter { it.isNotEmpty() }
             .joinToString(" ")
+    }
+
+    /**
+     * Signs a message using EIP-191 personal_sign standard:
+     * "\x19Ethereum Signed Message:\n" + len(message) + message
+     * Returns 0x-prefixed 65-byte hex signature (r + s + v).
+     */
+    fun personalSign(message: String, privateKeyHex: String): String {
+        val cleanKey = privateKeyHex.removePrefix("0x")
+        val ecKeyPair = ECKeyPair.create(BigInteger(cleanKey, 16))
+        val messageBytes = if (message.startsWith("0x") && message.length % 2 == 0 && message.length > 2) {
+            try {
+                Numeric.hexStringToByteArray(message)
+            } catch (_: Exception) {
+                message.toByteArray(Charsets.UTF_8)
+            }
+        } else {
+            message.toByteArray(Charsets.UTF_8)
+        }
+        val signatureData = Sign.signPrefixedMessage(messageBytes, ecKeyPair)
+        val r = Numeric.toHexStringNoPrefixZeroPadded(Numeric.toBigInt(signatureData.r), 64)
+        val s = Numeric.toHexStringNoPrefixZeroPadded(Numeric.toBigInt(signatureData.s), 64)
+        val v = Numeric.toHexStringNoPrefix(Numeric.toBigInt(signatureData.v)).padStart(2, '0')
+        return "0x$r$s$v"
+    }
+
+    /**
+     * Signs a legacy / EIP-155 EVM transaction with the provided chain ID and returns the raw hex string.
+     */
+    fun signTransaction(
+        nonce: BigInteger,
+        gasPrice: BigInteger,
+        gasLimit: BigInteger,
+        to: String,
+        value: BigInteger,
+        data: String,
+        chainId: Long,
+        privateKeyHex: String
+    ): String {
+        val cleanKey = privateKeyHex.removePrefix("0x")
+        val credentials = Credentials.create(cleanKey)
+        val cleanData = if (data.isBlank()) "" else if (data.startsWith("0x")) data.substring(2) else data
+        val rawTx = RawTransaction.createTransaction(
+            nonce,
+            gasPrice,
+            gasLimit,
+            to,
+            value,
+            cleanData
+        )
+        val signedBytes = TransactionEncoder.signMessage(rawTx, chainId, credentials)
+        return Numeric.toHexString(signedBytes)
     }
 }
 

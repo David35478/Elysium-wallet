@@ -45,10 +45,11 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.model.EvmNetworkConfig
+import com.example.model.NetworkConnectionStatus
 import com.example.model.WalletAccount
 import com.example.ui.theme.ElysiumAmber
 import com.example.ui.theme.ElysiumGreenPositive
-import com.example.ui.theme.ElysiumMint
 import com.example.ui.theme.ElysiumPrimaryFixed
 import com.example.ui.theme.ElysiumTextPrimary
 import com.example.ui.theme.ElysiumTextTertiary
@@ -57,6 +58,13 @@ import com.example.ui.theme.hyperliquidCardBrush
 @Composable
 fun TopWalletHeaderCard(
     wallet: WalletAccount,
+    selectedNetwork: EvmNetworkConfig,
+    networkStatus: NetworkConnectionStatus,
+    balanceFormatted: String?,
+    isNetworkLoading: Boolean,
+    networkErrorMessage: String?,
+    onRefreshClick: () -> Unit,
+    onNetworkClick: () -> Unit,
     onSwitchWalletClick: () -> Unit,
     onCopyAddressClick: () -> Unit,
     onHistoryClick: () -> Unit,
@@ -64,11 +72,6 @@ fun TopWalletHeaderCard(
     onReceiveClick: () -> Unit,
     onSwapClick: () -> Unit,
     onBuySellClick: () -> Unit,
-    testnetNetworkName: String = "Elysium Testnet (99801)",
-    testnetHypeBalance: String? = null,
-    isTestnetLoading: Boolean = false,
-    testnetErrorMessage: String? = null,
-    onRefreshClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "spin_refresh")
@@ -95,7 +98,7 @@ fun TopWalletHeaderCard(
             .testTag("top_balance_card")
     ) {
         Column {
-            // Top Row: Wallet Switcher & History Button
+            // Top Row: Wallet Switcher & Controls
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -172,7 +175,7 @@ fun TopWalletHeaderCard(
                             tint = ElysiumPrimaryFixed,
                             modifier = Modifier
                                 .size(18.dp)
-                                .then(if (isTestnetLoading) Modifier.rotate(rotation) else Modifier)
+                                .then(if (isNetworkLoading) Modifier.rotate(rotation) else Modifier)
                         )
                     }
 
@@ -199,41 +202,75 @@ fun TopWalletHeaderCard(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Testnet Network Badge
+            // Network Status Banner / Selector Pill
+            val badgeStatusColor = when (networkStatus) {
+                NetworkConnectionStatus.CONNECTED -> ElysiumGreenPositive
+                NetworkConnectionStatus.CHECKING -> ElysiumPrimaryFixed
+                NetworkConnectionStatus.WRONG_CHAIN -> ElysiumAmber
+                NetworkConnectionStatus.UNAVAILABLE -> ElysiumAmber
+            }
+
+            val badgeText = when (networkStatus) {
+                NetworkConnectionStatus.CONNECTED -> "${selectedNetwork.name} (${selectedNetwork.chainId}) • Connected"
+                NetworkConnectionStatus.CHECKING -> "Checking ${selectedNetwork.name}..."
+                NetworkConnectionStatus.WRONG_CHAIN -> "${selectedNetwork.name} • Wrong Chain ID"
+                NetworkConnectionStatus.UNAVAILABLE -> "${selectedNetwork.name} • Disconnected"
+            }
+
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0x268DF5DC))
-                    .border(1.dp, Color(0x408DF5DC), RoundedCornerShape(12.dp))
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                    .background(badgeStatusColor.copy(alpha = 0.15f))
+                    .border(1.dp, badgeStatusColor.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+                    .clickable(onClick = onNetworkClick)
+                    .padding(horizontal = 10.dp, vertical = 5.dp)
                     .testTag("network_badge_pill")
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(if (testnetErrorMessage != null) ElysiumAmber else ElysiumGreenPositive)
-                )
+                if (networkStatus == NetworkConnectionStatus.CHECKING) {
+                    CircularProgressIndicator(
+                        color = badgeStatusColor,
+                        strokeWidth = 1.5.dp,
+                        modifier = Modifier.size(9.dp)
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(badgeStatusColor)
+                    )
+                }
+
                 Spacer(modifier = Modifier.width(6.dp))
+
                 Text(
-                    text = testnetNetworkName,
+                    text = badgeText,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = ElysiumPrimaryFixed,
+                    color = badgeStatusColor,
                     letterSpacing = 0.3.sp
+                )
+
+                Spacer(modifier = Modifier.width(4.dp))
+
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowDown,
+                    contentDescription = "Switch Network",
+                    tint = badgeStatusColor.copy(alpha = 0.8f),
+                    modifier = Modifier.size(14.dp)
                 )
             }
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Live Native HYPE Balance
+            // Live Native Balance
             Row(
                 verticalAlignment = Alignment.Bottom,
                 modifier = Modifier.testTag("hype_balance_row")
             ) {
                 Text(
-                    text = testnetHypeBalance ?: "0.0",
+                    text = balanceFormatted ?: "0.0",
                     fontSize = 36.sp,
                     fontWeight = FontWeight.Bold,
                     color = ElysiumTextPrimary,
@@ -243,14 +280,14 @@ fun TopWalletHeaderCard(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "HYPE",
+                    text = selectedNetwork.nativeCurrencySymbol,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                     color = ElysiumPrimaryFixed,
                     modifier = Modifier.padding(bottom = 4.dp)
                 )
 
-                if (isTestnetLoading) {
+                if (isNetworkLoading) {
                     Spacer(modifier = Modifier.width(10.dp))
                     CircularProgressIndicator(
                         color = ElysiumPrimaryFixed,
@@ -264,41 +301,50 @@ fun TopWalletHeaderCard(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Subtitle: Testnet Native Asset (No USD value fabricated)
+            // Subtitle: Honest native asset description
             Text(
-                text = "Native Elysium Testnet Token • Verified RPC Chain ID 99801",
+                text = "Native ${selectedNetwork.name} Asset • RPC Chain ID ${selectedNetwork.chainId}",
                 fontSize = 12.sp,
                 color = ElysiumTextTertiary
             )
 
-            // RPC Error Feedback (if any) with Retry Action
-            AnimatedVisibility(visible = testnetErrorMessage != null) {
-                testnetErrorMessage?.let { errMsg ->
+            // Honest Error Banner with Retry Action
+            AnimatedVisibility(visible = networkErrorMessage != null) {
+                networkErrorMessage?.let { errMsg ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = 10.dp)
                             .clip(RoundedCornerShape(10.dp))
                             .background(ElysiumAmber.copy(alpha = 0.15f))
-                            .border(1.dp, ElysiumAmber.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
-                            .clickable(onClick = onRefreshClick),
+                            .border(1.dp, ElysiumAmber.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                            .clickable(onClick = onRefreshClick)
+                            .padding(horizontal = 10.dp, vertical = 7.dp)
+                            .testTag("network_error_banner"),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
                             imageVector = Icons.Default.Warning,
                             contentDescription = null,
                             tint = ElysiumAmber,
-                            modifier = Modifier.size(14.dp)
+                            modifier = Modifier.size(15.dp)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "$errMsg (Tap to retry)",
-                            fontSize = 11.sp,
-                            color = ElysiumAmber,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 2
-                        )
+                        Spacer(modifier = Modifier.width(7.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = errMsg,
+                                fontSize = 11.sp,
+                                color = ElysiumAmber,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 2
+                            )
+                            Text(
+                                text = "Tap to retry connection",
+                                fontSize = 10.sp,
+                                color = ElysiumAmber.copy(alpha = 0.8f),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }

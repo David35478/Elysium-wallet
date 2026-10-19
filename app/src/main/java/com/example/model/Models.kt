@@ -9,6 +9,7 @@ enum class Screen {
     ONBOARDING_READY,
     HOME,
     SWAP,
+    BROWSER,
     ACTIVITY,
     SETTINGS
 }

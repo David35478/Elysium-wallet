@@ -5,6 +5,10 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import com.example.core.crypto.CryptoManager
 import com.example.core.security.BiometricAuthManager
 import com.example.data.SampleData
@@ -17,10 +21,26 @@ import com.example.model.TokenAsset
 import com.example.model.TransactionItem
 import com.example.model.WalletAccount
 import com.example.ui.components.HomeTab
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
+import com.example.core.network.EvmRpcClient
+import com.example.core.network.NetworkRegistry
+import com.example.core.network.RpcResult
+import com.example.model.EvmNetworkConfig
+import com.example.model.NetworkConnectionStatus
+import com.example.model.TokenIconType
+import com.example.core.dapp.WalletProviderBridge
+import com.example.data.repository.BrowserStorageRepository
+import com.example.data.repository.DappPermissionRepository
+import com.example.model.DappBookmark
+import com.example.model.DappChainSwitchRequest
+import com.example.model.DappConnectionRequest
+import com.example.model.DappHistoryItem
+import com.example.model.DappPermission
+import com.example.model.DappSignMessageRequest
+import com.example.model.DappTransactionRequest
+import com.example.model.FeaturedDapp
+import android.webkit.WebView
+import java.lang.ref.WeakReference
+import kotlinx.coroutines.Job
 import java.util.Locale
 
 data class WalletUiState(
@@ -30,7 +50,7 @@ data class WalletUiState(
     val storedVaultWallets: List<StoredWalletHeader> = emptyList(),
     val selectedHomeTab: HomeTab = HomeTab.CRYPTO,
     val isSecurityBannerVisible: Boolean = true,
-    val tokens: List<TokenAsset> = SampleData.sampleTokens,
+    val tokens: List<TokenAsset> = emptyList(),
     val nfts: List<NftItem> = SampleData.sampleNfts,
     val transactions: List<TransactionItem> = SampleData.sampleTransactions,
     val chains: List<Chain> = SampleData.sampleChains,
@@ -70,25 +90,89 @@ data class WalletUiState(
     // Onboarding in-flight state
     val onboardingMnemonic: String? = null,
 
-    // Phase 3: Elysium Testnet (Chain ID 99801) State
-    val isTestnetActive: Boolean = true,
-    val testnetNetworkName: String = "Elysium Testnet (99801)",
-    val testnetChainId: Long = 99801L,
-    val testnetChainIdConfirmed: Boolean = false,
-    val testnetHypeBalance: String? = null,
-    val isTestnetLoading: Boolean = false,
-    val testnetErrorMessage: String? = null,
-    val testnetLastUpdated: Long? = null
-)
+    // Multi-Network EVM Architecture State
+    val selectedNetwork: EvmNetworkConfig = NetworkRegistry.ELYSIUM_TESTNET,
+    val availableNetworks: List<EvmNetworkConfig> = NetworkRegistry.BUILT_IN_NETWORKS,
+    val networkStatus: NetworkConnectionStatus = NetworkConnectionStatus.CHECKING,
+    val networkBlockNumber: Long? = null,
+    val networkBalanceFormatted: String? = null,
+    val isNetworkLoading: Boolean = false,
+    val networkErrorMessage: String? = null,
+    val networkLastUpdated: Long? = null,
+    val showNetworkSelectorDialog: Boolean = false,
+
+    // DApp Browser State
+    val browserCurrentUrl: String? = null,
+    val browserPageTitle: String? = null,
+    val isBrowserLoading: Boolean = false,
+    val browserProgress: Int = 0,
+    val browserErrorMessage: String? = null,
+    val browserBookmarks: List<DappBookmark> = emptyList(),
+    val browserHistory: List<DappHistoryItem> = emptyList(),
+    val featuredDapps: List<FeaturedDapp> = BrowserStorageRepository.DEFAULT_FEATURED_DAPPS,
+    val pendingConnectionRequest: DappConnectionRequest? = null,
+    val pendingSignMessageRequest: DappSignMessageRequest? = null,
+    val pendingTransactionRequest: DappTransactionRequest? = null,
+    val pendingChainSwitchRequest: DappChainSwitchRequest? = null,
+    val connectedDappsList: List<DappPermission> = emptyList()
+) {
+    // Backwards-compatible convenience properties
+    val isTestnetActive: Boolean get() = selectedNetwork.isTestnet
+    val testnetNetworkName: String get() = "${selectedNetwork.name} (${selectedNetwork.chainId})"
+    val testnetChainId: Long get() = selectedNetwork.chainId
+    val testnetChainIdConfirmed: Boolean get() = networkStatus == NetworkConnectionStatus.CONNECTED
+    val testnetHypeBalance: String? get() = networkBalanceFormatted
+    val isTestnetLoading: Boolean get() = isNetworkLoading
+    val testnetErrorMessage: String? get() = networkErrorMessage
+}
 
 class WalletViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = WalletVaultRepository(application)
-    private val rpcClient = com.example.core.network.ElysiumRpcClient()
+    private val networkRegistry = NetworkRegistry(application)
+    private val browserStorage = BrowserStorageRepository(application)
+    private val dappPermissionRepository = DappPermissionRepository(application)
+    private var evmRpcClient = EvmRpcClient(networkRegistry.getSelectedNetwork())
+    private var networkRefreshJob: Job? = null
+    private var webViewRef: WeakReference<WebView>? = null
+
+    val walletProviderBridge: WalletProviderBridge = WalletProviderBridge(
+        webViewProvider = { webViewRef?.get() },
+        getActiveWallet = { _uiState.value.selectedWallet },
+        getSelectedNetwork = { _uiState.value.selectedNetwork },
+        permissionRepository = dappPermissionRepository,
+        networkRegistry = networkRegistry,
+        scope = viewModelScope,
+        onConnectionRequested = { request ->
+            _uiState.update { it.copy(pendingConnectionRequest = request) }
+        },
+        onSignMessageRequested = { request ->
+            _uiState.update { it.copy(pendingSignMessageRequest = request) }
+        },
+        onTransactionRequested = { request ->
+            _uiState.update { it.copy(pendingTransactionRequest = request) }
+        },
+        onChainSwitchRequested = { request ->
+            _uiState.update { it.copy(pendingChainSwitchRequest = request) }
+        }
+    )
+
     private val _uiState = MutableStateFlow(WalletUiState())
     val uiState: StateFlow<WalletUiState> = _uiState.asStateFlow()
 
     init {
+        val initialNetwork = networkRegistry.getSelectedNetwork()
+        evmRpcClient = EvmRpcClient(initialNetwork)
+        _uiState.update {
+            it.copy(
+                selectedNetwork = initialNetwork,
+                availableNetworks = networkRegistry.getAllNetworks(),
+                tokens = generateTokenListForNetwork(initialNetwork, null),
+                browserBookmarks = browserStorage.getBookmarks(),
+                browserHistory = browserStorage.getHistory(),
+                connectedDappsList = dappPermissionRepository.getAllPermissions()
+            )
+        }
         loadWalletsFromVault()
     }
 
@@ -131,7 +215,7 @@ class WalletViewModel(application: Application) : AndroidViewModel(application) 
             )
         }
 
-        refreshTestnetBalance()
+        refreshNetworkBalance()
     }
 
     fun navigateTo(screen: Screen) {
@@ -234,88 +318,169 @@ class WalletViewModel(application: Application) : AndroidViewModel(application) 
                 onboardingMnemonic = null
             )
         }
-        refreshTestnetBalance()
+        refreshNetworkBalance()
     }
 
     /**
-     * Phase 3: Bounded RPC balance query for the derived EVM wallet address
-     * against Elysium / Hyperliquid EVM Testnet (Chain ID 99801).
-     * Strictly avoids floating-point math, safely handles wrong-chain and RPC errors,
-     * and never transmits secret keys.
+     * Switches the active EVM network.
+     * Persists the selected network separately from wallet identity.
+     * Re-validates the new RPC, fetches the fresh native balance, and updates assets.
      */
-    fun refreshTestnetBalance() {
+    fun selectNetwork(network: EvmNetworkConfig) {
+        networkRegistry.setSelectedNetworkId(network.id)
+        evmRpcClient = EvmRpcClient(network)
+        _uiState.update {
+            it.copy(
+                selectedNetwork = network,
+                networkStatus = NetworkConnectionStatus.CHECKING,
+                networkBalanceFormatted = null,
+                networkErrorMessage = null,
+                tokens = generateTokenListForNetwork(network, null),
+                userNotification = "Switched to ${network.name}"
+            )
+        }
+        refreshNetworkBalance()
+    }
+
+    fun setShowNetworkSelector(show: Boolean) {
+        _uiState.update { it.copy(showNetworkSelectorDialog = show) }
+    }
+
+    /**
+     * Real RPC health check & native balance query for the selected EVM network.
+     * 1. Calls eth_chainId and validates response against expected network chainId.
+     * 2. If valid, fetches latest block number using eth_blockNumber.
+     * 3. Fetches native balance for the active wallet address using eth_getBalance.
+     * 4. Converts wei using exact decimal arithmetic with zero floating-point math.
+     * 5. Sets honest connection, loading, wrong-chain, or error states.
+     */
+    fun refreshNetworkBalance() {
         val address = _uiState.value.selectedWallet.fullAddress
         if (address.isBlank() || !address.startsWith("0x")) return
 
-        viewModelScope.launch {
+        networkRefreshJob?.cancel()
+        networkRefreshJob = viewModelScope.launch {
+            val network = _uiState.value.selectedNetwork
             _uiState.update {
                 it.copy(
-                    isTestnetLoading = true,
-                    testnetErrorMessage = null
+                    isNetworkLoading = true,
+                    networkErrorMessage = null,
+                    networkStatus = NetworkConnectionStatus.CHECKING
                 )
             }
 
-            // Step 1: Verify Chain ID (99801)
-            val chainIdResult = rpcClient.verifyChainId()
+            // Step 1: Real RPC Health Check - Verify Chain ID
+            val chainIdResult = evmRpcClient.verifyChainId()
             when (chainIdResult) {
-                is com.example.core.network.RpcResult.WrongChain -> {
+                is RpcResult.WrongChain -> {
                     _uiState.update {
                         it.copy(
-                            isTestnetLoading = false,
-                            testnetChainIdConfirmed = false,
-                            testnetErrorMessage = "RPC wrong chain: ${chainIdResult.actual} (expected 99801)"
+                            isNetworkLoading = false,
+                            networkStatus = NetworkConnectionStatus.WRONG_CHAIN,
+                            networkErrorMessage = "RPC wrong chain: ${chainIdResult.actual} (expected ${network.chainId})"
                         )
                     }
                     return@launch
                 }
-                is com.example.core.network.RpcResult.Error -> {
+                is RpcResult.Error -> {
                     _uiState.update {
                         it.copy(
-                            isTestnetLoading = false,
-                            testnetErrorMessage = chainIdResult.message
+                            isNetworkLoading = false,
+                            networkStatus = NetworkConnectionStatus.UNAVAILABLE,
+                            networkErrorMessage = "Unable to connect to ${network.name}: ${chainIdResult.message}"
                         )
                     }
                     return@launch
                 }
-                is com.example.core.network.RpcResult.Success -> {
+                is RpcResult.Success -> {
                     _uiState.update {
-                        it.copy(testnetChainIdConfirmed = true)
+                        it.copy(networkStatus = NetworkConnectionStatus.CONNECTED)
                     }
                 }
             }
 
-            // Step 2: Query native HYPE balance for derived wallet address
-            val balanceResult = rpcClient.getNativeHypeBalance(address)
+            // Step 2: Query latest block height
+            val blockResult = evmRpcClient.getLatestBlockNumber()
+            if (blockResult is RpcResult.Success) {
+                _uiState.update {
+                    it.copy(networkBlockNumber = blockResult.data)
+                }
+            }
+
+            // Step 3: Query native balance for the active wallet address
+            val balanceResult = evmRpcClient.getBalance(address)
             when (balanceResult) {
-                is com.example.core.network.RpcResult.Success -> {
-                    val bal = balanceResult.data
+                is RpcResult.Success -> {
+                    val formatted = balanceResult.data.formattedBalance
                     _uiState.update {
                         it.copy(
-                            isTestnetLoading = false,
-                            testnetHypeBalance = bal.formattedHype,
-                            testnetLastUpdated = System.currentTimeMillis(),
-                            testnetErrorMessage = null
+                            isNetworkLoading = false,
+                            networkBalanceFormatted = formatted,
+                            networkLastUpdated = System.currentTimeMillis(),
+                            networkErrorMessage = null,
+                            tokens = generateTokenListForNetwork(network, formatted)
                         )
                     }
                 }
-                is com.example.core.network.RpcResult.Error -> {
+                is RpcResult.Error -> {
                     _uiState.update {
                         it.copy(
-                            isTestnetLoading = false,
-                            testnetErrorMessage = balanceResult.message
+                            isNetworkLoading = false,
+                            networkErrorMessage = "Balance query error: ${balanceResult.message}"
                         )
                     }
                 }
-                is com.example.core.network.RpcResult.WrongChain -> {
+                is RpcResult.WrongChain -> {
                     _uiState.update {
                         it.copy(
-                            isTestnetLoading = false,
-                            testnetErrorMessage = "Wrong network detected"
+                            isNetworkLoading = false,
+                            networkStatus = NetworkConnectionStatus.WRONG_CHAIN,
+                            networkErrorMessage = "Unexpected wrong chain response"
                         )
                     }
                 }
             }
         }
+    }
+
+    /**
+     * Backwards-compatible alias for refreshing balance.
+     */
+    fun refreshTestnetBalance() {
+        refreshNetworkBalance()
+    }
+
+    /**
+     * Generates honest token list for the selected network without fabricated data or prices.
+     */
+    private fun generateTokenListForNetwork(network: EvmNetworkConfig, balance: String?): List<TokenAsset> {
+        val cleanBalance = balance ?: "0.0"
+        val balanceNumeric = cleanBalance.toDoubleOrNull() ?: 0.0
+        val iconType = when (network.nativeCurrencySymbol) {
+            "HYPE" -> TokenIconType.HYPE
+            "ETH" -> TokenIconType.ETH
+            "BNB" -> TokenIconType.BNB
+            "SOL" -> TokenIconType.SOL
+            else -> TokenIconType.HYPE
+        }
+
+        val nativeToken = TokenAsset(
+            id = "native_${network.id}",
+            symbol = network.nativeCurrencySymbol,
+            name = "${network.name} Native",
+            balance = balanceNumeric,
+            balanceDisplay = "$cleanBalance ${network.nativeCurrencySymbol}",
+            fiatPrice = 0.0,
+            fiatValue = 0.0,
+            fiatDisplay = "—",
+            priceChange24hPct = 0.0,
+            priceChangeDisplay = if (network.isTestnet) "Testnet Native Asset" else "Native Asset",
+            isPositive = true,
+            chain = network.name,
+            iconType = iconType
+        )
+
+        return listOf(nativeToken)
     }
 
     fun copyMnemonicToClipboard() {
@@ -566,6 +731,343 @@ class WalletViewModel(application: Application) : AndroidViewModel(application) 
     fun triggerActionNotImplemented(featureName: String) {
         _uiState.update {
             it.copy(userNotification = "$featureName is not active in this preview.")
+        }
+    }
+
+    // DApp Browser Actions & Provider Bridge Handlers
+    fun setWebViewInstance(webView: WebView) {
+        webViewRef = WeakReference(webView)
+    }
+
+    fun openDappUrl(url: String) {
+        val cleanUrl = url.trim()
+        val origin = DappPermissionRepository.extractOrigin(cleanUrl)
+        walletProviderBridge.cancelPendingRequestsForOriginOrContext(
+            newOrigin = origin,
+            newAccount = null,
+            newChainId = null
+        )
+        browserStorage.addHistoryItem(cleanUrl, cleanUrl)
+        _uiState.update {
+            it.copy(
+                browserCurrentUrl = cleanUrl,
+                browserErrorMessage = null,
+                isBrowserLoading = true,
+                browserHistory = browserStorage.getHistory()
+            )
+        }
+    }
+
+    fun closeDappBrowser() {
+        walletProviderBridge.cancelPendingRequestsForOriginOrContext(
+            newOrigin = "",
+            newAccount = null,
+            newChainId = null
+        )
+        _uiState.update {
+            it.copy(
+                browserCurrentUrl = null,
+                browserPageTitle = null,
+                browserErrorMessage = null,
+                isBrowserLoading = false,
+                pendingConnectionRequest = null,
+                pendingSignMessageRequest = null,
+                pendingTransactionRequest = null,
+                pendingChainSwitchRequest = null
+            )
+        }
+    }
+
+    fun onBrowserPageStarted(url: String) {
+        val newOrigin = DappPermissionRepository.extractOrigin(url)
+        walletProviderBridge.cancelPendingRequestsForOriginOrContext(
+            newOrigin = newOrigin,
+            newAccount = null,
+            newChainId = null
+        )
+        _uiState.update {
+            it.copy(
+                browserCurrentUrl = url,
+                isBrowserLoading = true,
+                browserProgress = 10,
+                browserErrorMessage = null
+            )
+        }
+    }
+
+    fun onBrowserPageFinished(url: String, title: String?) {
+        if (!title.isNullOrBlank()) {
+            browserStorage.addHistoryItem(title, url)
+        }
+        _uiState.update {
+            it.copy(
+                browserCurrentUrl = url,
+                browserPageTitle = title,
+                isBrowserLoading = false,
+                browserProgress = 100,
+                browserHistory = browserStorage.getHistory()
+            )
+        }
+    }
+
+    fun onBrowserProgressChanged(progress: Int) {
+        _uiState.update {
+            it.copy(
+                browserProgress = progress,
+                isBrowserLoading = progress < 100
+            )
+        }
+    }
+
+    fun onBrowserError(error: String) {
+        _uiState.update {
+            it.copy(
+                browserErrorMessage = error,
+                isBrowserLoading = false
+            )
+        }
+    }
+
+    fun toggleBookmark(title: String, url: String) {
+        if (browserStorage.isBookmarked(url)) {
+            browserStorage.removeBookmark(url)
+            _uiState.update {
+                it.copy(
+                    browserBookmarks = browserStorage.getBookmarks(),
+                    userNotification = "Bookmark removed"
+                )
+            }
+        } else {
+            browserStorage.addBookmark(title, url)
+            _uiState.update {
+                it.copy(
+                    browserBookmarks = browserStorage.getBookmarks(),
+                    userNotification = "Bookmark saved"
+                )
+            }
+        }
+    }
+
+    fun removeBookmark(url: String) {
+        browserStorage.removeBookmark(url)
+        _uiState.update {
+            it.copy(
+                browserBookmarks = browserStorage.getBookmarks(),
+                userNotification = "Bookmark removed"
+            )
+        }
+    }
+
+    fun clearBrowserHistory() {
+        browserStorage.clearHistory()
+        _uiState.update {
+            it.copy(
+                browserHistory = emptyList(),
+                userNotification = "Browsing history cleared"
+            )
+        }
+    }
+
+    // Permission & Approval handlers
+    fun approveDappConnection(requestId: String) {
+        val req = _uiState.value.pendingConnectionRequest ?: return
+        walletProviderBridge.approveConnection(requestId, req.origin, _uiState.value.selectedWallet.fullAddress)
+        _uiState.update {
+            it.copy(
+                pendingConnectionRequest = null,
+                connectedDappsList = dappPermissionRepository.getAllPermissions(),
+                userNotification = "Connected to ${req.hostname}"
+            )
+        }
+    }
+
+    fun rejectDappConnection(requestId: String) {
+        walletProviderBridge.rejectRequest(requestId, "User rejected connection")
+        _uiState.update { it.copy(pendingConnectionRequest = null) }
+    }
+
+    fun approveDappSignMessage(requestId: String) {
+        val req = _uiState.value.pendingSignMessageRequest ?: return
+        val activeWallet = _uiState.value.selectedWallet
+        viewModelScope.launch {
+            val decryptResult = repository.decryptSecretPayload(activeWallet.id)
+            if (decryptResult.isFailure) {
+                walletProviderBridge.rejectRequest(requestId, "Failed to decrypt wallet keys")
+                _uiState.update {
+                    it.copy(
+                        pendingSignMessageRequest = null,
+                        userNotification = "Failed to access keys"
+                    )
+                }
+                return@launch
+            }
+
+            val secret = decryptResult.getOrThrow()
+            val derived = CryptoManager.deriveEvmAccount(secret.mnemonic)
+            try {
+                val sigHex = CryptoManager.personalSign(req.rawMessage, derived.privateKeyHex)
+                walletProviderBridge.approveSignMessage(requestId, sigHex)
+                _uiState.update {
+                    it.copy(
+                        pendingSignMessageRequest = null,
+                        userNotification = "Message signed for ${req.hostname}"
+                    )
+                }
+            } catch (e: Exception) {
+                walletProviderBridge.rejectRequest(requestId, "Signing error: ${e.message}")
+                _uiState.update {
+                    it.copy(
+                        pendingSignMessageRequest = null,
+                        userNotification = "Signing error: ${e.message}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun rejectDappSignMessage(requestId: String) {
+        walletProviderBridge.rejectRequest(requestId, "User rejected signature")
+        _uiState.update { it.copy(pendingSignMessageRequest = null) }
+    }
+
+    fun approveDappTransaction(requestId: String) {
+        val req = _uiState.value.pendingTransactionRequest ?: return
+        val activeWallet = _uiState.value.selectedWallet
+        val currentNetwork = _uiState.value.selectedNetwork
+
+        viewModelScope.launch {
+            // Step 1: Re-validate active network chain ID
+            val chainCheck = evmRpcClient.verifyChainId()
+            if (chainCheck !is RpcResult.Success) {
+                walletProviderBridge.rejectRequest(requestId, "Network validation failed before broadcast")
+                _uiState.update {
+                    it.copy(
+                        pendingTransactionRequest = null,
+                        userNotification = "Network validation failed. Transaction cancelled."
+                    )
+                }
+                return@launch
+            }
+
+            // Step 2: Fetch nonce
+            val nonceResult = evmRpcClient.getTransactionCount(activeWallet.fullAddress)
+            val nonce = when (nonceResult) {
+                is RpcResult.Success -> nonceResult.data
+                else -> java.math.BigInteger.ZERO
+            }
+
+            // Step 3: Decrypt private key
+            val decryptResult = repository.decryptSecretPayload(activeWallet.id)
+            if (decryptResult.isFailure) {
+                walletProviderBridge.rejectRequest(requestId, "Decryption error")
+                _uiState.update {
+                    it.copy(
+                        pendingTransactionRequest = null,
+                        userNotification = "Failed to access keys"
+                    )
+                }
+                return@launch
+            }
+
+            val secret = decryptResult.getOrThrow()
+            val derived = CryptoManager.deriveEvmAccount(secret.mnemonic)
+
+            try {
+                val gasPrice = if (req.gasPrice > java.math.BigInteger.ZERO) req.gasPrice else java.math.BigInteger.valueOf(20_000_000_000L)
+                val signedRawHex = CryptoManager.signTransaction(
+                    nonce = nonce,
+                    gasPrice = gasPrice,
+                    gasLimit = req.gasLimit,
+                    to = req.toAddress,
+                    value = req.valueWei,
+                    data = req.data,
+                    chainId = currentNetwork.chainId,
+                    privateKeyHex = derived.privateKeyHex
+                )
+
+                // Step 4: Broadcast to RPC
+                val broadcastResult = evmRpcClient.sendRawTransaction(signedRawHex)
+                when (broadcastResult) {
+                    is RpcResult.Success -> {
+                        walletProviderBridge.approveTransaction(requestId, broadcastResult.data)
+                        _uiState.update {
+                            it.copy(
+                                pendingTransactionRequest = null,
+                                userNotification = "Transaction broadcasted: ${broadcastResult.data.take(10)}..."
+                            )
+                        }
+                    }
+                    is RpcResult.Error -> {
+                        walletProviderBridge.rejectRequest(requestId, broadcastResult.message)
+                        _uiState.update {
+                            it.copy(
+                                pendingTransactionRequest = null,
+                                userNotification = "Broadcast error: ${broadcastResult.message}"
+                            )
+                        }
+                    }
+                    is RpcResult.WrongChain -> {
+                        walletProviderBridge.rejectRequest(requestId, "Wrong chain ID detected on RPC node")
+                        _uiState.update {
+                            it.copy(
+                                pendingTransactionRequest = null,
+                                userNotification = "RPC node wrong chain: transaction blocked"
+                            )
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                walletProviderBridge.rejectRequest(requestId, "Transaction failed: ${e.message}")
+                _uiState.update {
+                    it.copy(
+                        pendingTransactionRequest = null,
+                        userNotification = "Transaction failed: ${e.message}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun rejectDappTransaction(requestId: String) {
+        walletProviderBridge.rejectRequest(requestId, "User rejected transaction")
+        _uiState.update { it.copy(pendingTransactionRequest = null) }
+    }
+
+    fun approveDappChainSwitch(requestId: String) {
+        val req = _uiState.value.pendingChainSwitchRequest ?: return
+        val target = req.targetNetwork ?: return
+        selectNetwork(target)
+        walletProviderBridge.approveChainSwitch(requestId, target)
+        _uiState.update {
+            it.copy(
+                pendingChainSwitchRequest = null,
+                userNotification = "Switched to ${target.name}"
+            )
+        }
+    }
+
+    fun rejectDappChainSwitch(requestId: String) {
+        walletProviderBridge.rejectRequest(requestId, "User rejected chain switch")
+        _uiState.update { it.copy(pendingChainSwitchRequest = null) }
+    }
+
+    fun revokeDappPermission(origin: String) {
+        dappPermissionRepository.revokeOrigin(origin)
+        _uiState.update {
+            it.copy(
+                connectedDappsList = dappPermissionRepository.getAllPermissions(),
+                userNotification = "Disconnected $origin"
+            )
+        }
+    }
+
+    fun revokeAllDappPermissions() {
+        dappPermissionRepository.clearAllPermissions()
+        _uiState.update {
+            it.copy(
+                connectedDappsList = emptyList(),
+                userNotification = "All DApp permissions revoked"
+            )
         }
     }
 }
